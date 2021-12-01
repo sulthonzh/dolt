@@ -119,19 +119,24 @@ func newTableEditor(ctx *sql.Context, tbl *doltdb.Table) (TableWriter, error) {
 		return TableWriter{}, err
 	}
 
-	autoCol, err := autoIncColFromTable(ctx, tbl)
+	autoCol, ok, err := autoIncColFromTable(ctx, tbl)
 	if err != nil {
 		return TableWriter{}, err
 	}
 
-	v, err := tbl.GetAutoIncrementValue(ctx)
-	if err != nil {
-		panic(err)
-	}
+	var i interface{}
+	if ok {
+		v, err := tbl.GetAutoIncrementValue(ctx)
+		if err != nil {
+			panic(err)
+		}
 
-	i, err := autoCol.TypeInfo.ConvertNomsValueToValue(v)
-	if err != nil {
-		panic(err)
+		i, err = autoCol.TypeInfo.ConvertNomsValueToValue(v)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		i = 0
 	}
 
 	thing := newAutoThing(i)

@@ -24,21 +24,25 @@ import (
 	"github.com/dolthub/dolt/go/libraries/doltcore/schema"
 )
 
-func autoIncColFromTable(ctx context.Context, tbl *doltdb.Table) (schema.Column, error) {
+func autoIncColFromTable(ctx context.Context, tbl *doltdb.Table) (schema.Column, bool, error) {
 	sch, err := tbl.GetSchema(ctx)
 	if err != nil {
-		return schema.Column{}, err
+		return schema.Column{}, false, err
 	}
 
 	var autoCol schema.Column
+	var found bool
+
 	_ = sch.GetAllCols().Iter(func(tag uint64, col schema.Column) (stop bool, err error) {
 		if col.AutoIncrement {
 			autoCol = col
 			stop = true
+			found = true
 		}
 		return
 	})
-	return autoCol, nil
+
+	return autoCol, found, nil
 }
 
 // blah
