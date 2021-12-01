@@ -308,3 +308,13 @@ func (gcs *GenerationalNBS) SetRootChunk(ctx context.Context, root, previous has
 func (gcs *GenerationalNBS) SupportedOperations() TableFileStoreOps {
 	return gcs.newGen.SupportedOperations()
 }
+
+func (gcs *GenerationalNBS) GetAll(ctx context.Context, found func(context.Context, *chunks.Chunk)) (err error) {
+	err = gcs.newGen.GetAll(ctx, found)
+
+	if err != nil {
+		return err
+	}
+
+	return gcs.oldGen.GetAll(ctx, found)
+}

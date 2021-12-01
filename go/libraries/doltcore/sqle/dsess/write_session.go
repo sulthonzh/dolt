@@ -1,4 +1,4 @@
-// Copyright 2019 Dolthub, Inc.
+// Copyright 2021 Dolthub, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@
 package dsess
 
 import (
-	"context"
 	"errors"
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
 
 	"github.com/dolthub/dolt/go/libraries/doltcore/doltdb"
-	"github.com/dolthub/dolt/go/libraries/doltcore/schema"
+	"github.com/dolthub/dolt/go/libraries/doltcore/sqle/index"
 	"github.com/dolthub/dolt/go/store/prolly"
 	"github.com/dolthub/dolt/go/store/types"
 )
@@ -100,8 +99,8 @@ func (es WriteSession) CloseEditors(ctx *sql.Context) (err error) {
 }
 
 type TableWriter struct {
-	primary indexWriter
-	indexes map[string]indexWriter
+	primary index.Writer
+	indexes map[string]index.Writer
 
 	thing *autoThing
 
@@ -115,12 +114,12 @@ var _ sql.RowInserter = TableWriter{}
 var _ sql.RowDeleter = TableWriter{}
 
 func newTableEditor(ctx *sql.Context, tbl *doltdb.Table) (TableWriter, error) {
-	primary, indexes, err := indexWriterFromTable(ctx, tbl)
+	primary, indexes, err := index.WritersFromTable(ctx, tbl)
 	if err != nil {
 		return TableWriter{}, err
 	}
 
-	autoCol, err := getAutoIncCol(ctx, tbl)
+	autoCol, err := autoIncColFromTable(ctx, tbl)
 	if err != nil {
 		return TableWriter{}, err
 	}
@@ -258,7 +257,7 @@ func (ed TableWriter) SetAutoIncrementValue(_ *sql.Context, val interface{}) (er
 
 // Flush applies pending edits to |tbl| and returns the result.
 func (ed TableWriter) Flush(ctx *sql.Context, tbl *doltdb.Table) (*doltdb.Table, error) {
-	p, err := ed.primary.mut.Map(ctx)
+	p, err := ed.primary.Flush(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +274,7 @@ func (ed TableWriter) Flush(ctx *sql.Context, tbl *doltdb.Table) (*doltdb.Table,
 	indexes := id.Edit()
 
 	for name, edit := range ed.indexes {
-		idx, err := edit.mut.Map(ctx)
+		idx, err := edit.Flush(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -312,92 +311,4 @@ func (ed TableWriter) Close(ctx *sql.Context) (err error) {
 	}
 	ed.signal.closed = true
 	return err
-}
-
-// blah
-func newAutoThing(current interface{}) (at *autoThing) {
-	at = &autoThing{
-		current: coerceInt64(current),
-		mu:      sync.Mutex{},
-	}
-	return
-}
-
-type autoThing struct {
-	current int64
-	mu      sync.Mutex
-}
-
-var _ sql.AutoIncrementSetter = &autoThing{}
-
-func (at *autoThing) SetAutoIncrementValue(_ *sql.Context, value interface{}) (err error) {
-	at.Set(value)
-	return
-}
-
-func (at *autoThing) Close(*sql.Context) (err error) {
-	return
-}
-
-func (at *autoThing) Next(passed interface{}) int64 {
-	at.mu.Lock()
-	defer at.mu.Unlock()
-
-	var value int64
-	if passed != nil {
-		coerceInt64(passed)
-	}
-	if value > at.current {
-		at.current = value
-	}
-
-	current := at.current
-	at.current++
-	return current
-}
-
-func (at *autoThing) Peek() int64 {
-	at.mu.Lock()
-	defer at.mu.Unlock()
-	return at.current
-}
-
-func (at *autoThing) Set(value interface{}) {
-	at.mu.Lock()
-	defer at.mu.Unlock()
-	at.current = coerceInt64(value)
-}
-
-func coerceInt64(value interface{}) int64 {
-	switch v := value.(type) {
-	case int:
-		return int64(v)
-	case int8:
-		return int64(v)
-	case int16:
-		return int64(v)
-	case int32:
-		return int64(v)
-	case int64:
-		return int64(v)
-	default:
-		panic(value)
-	}
-}
-
-func getAutoIncCol(ctx context.Context, tbl *doltdb.Table) (schema.Column, error) {
-	sch, err := tbl.GetSchema(ctx)
-	if err != nil {
-		return schema.Column{}, err
-	}
-
-	var autoCol schema.Column
-	_ = sch.GetAllCols().Iter(func(tag uint64, col schema.Column) (stop bool, err error) {
-		if col.AutoIncrement {
-			autoCol = col
-			stop = true
-		}
-		return
-	})
-	return autoCol, nil
 }

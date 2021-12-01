@@ -31,7 +31,6 @@ import (
 	"github.com/dolthub/dolt/go/libraries/doltcore/schema"
 	"github.com/dolthub/dolt/go/libraries/doltcore/sqle/dsess"
 	"github.com/dolthub/dolt/go/libraries/doltcore/sqle/sqlutil"
-	"github.com/dolthub/dolt/go/libraries/doltcore/table/editor/creation"
 	"github.com/dolthub/dolt/go/store/hash"
 	"github.com/dolthub/dolt/go/store/prolly"
 	"github.com/dolthub/dolt/go/store/types"
@@ -730,63 +729,41 @@ func (t *AlterableDoltTable) CreateIndex(
 	indexColumns []sql.IndexColumn,
 	comment string,
 ) error {
-	return nil
-	//if constraint != sql.IndexConstraint_None && constraint != sql.IndexConstraint_Unique {
-	//	return fmt.Errorf("only the following types of index constraints are supported: none, unique")
-	//}
-	//columns := make([]string, len(indexColumns))
-	//for i, indexCol := range indexColumns {
-	//	columns[i] = indexCol.Name
-	//}
-	//
-	//table, err := t.doltTable(ctx)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//ret, err := creation.CreateIndex(ctx, table, indexName, columns, constraint == sql.IndexConstraint_Unique, true, comment)
-	//if err != nil {
-	//	return err
-	//}
-	//root, err := t.getRoot(ctx)
-	//if err != nil {
-	//	return err
-	//}
-	//if ret.OldIndex != nil && ret.OldIndex != ret.NewIndex { // old index was replaced, so we update foreign keys
-	//	fkc, err := root.GetForeignKeyCollection(ctx)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	for _, fk := range fkc.AllKeys() {
-	//		newFk := fk
-	//		if t.tableName == fk.TableName && fk.TableIndex == ret.OldIndex.Name() {
-	//			newFk.TableIndex = ret.NewIndex.Name()
-	//		}
-	//		if t.tableName == fk.ReferencedTableName && fk.ReferencedTableIndex == ret.OldIndex.Name() {
-	//			newFk.ReferencedTableIndex = ret.NewIndex.Name()
-	//		}
-	//		fkc.RemoveKeys(fk)
-	//		err = fkc.AddKeys(newFk)
-	//		if err != nil {
-	//			return err
-	//		}
-	//	}
-	//	root, err = root.PutForeignKeyCollection(ctx, fkc)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	//newRoot, err := root.PutTable(ctx, t.tableName, ret.NewTable)
-	//if err != nil {
-	//	return err
-	//}
-	//
-	//err = t.setRoot(ctx, newRoot)
-	//
-	//if err != nil {
-	//	return err
-	//}
-	//return t.updateFromRoot(ctx, newRoot)
+	if constraint != sql.IndexConstraint_None && constraint != sql.IndexConstraint_Unique {
+		return fmt.Errorf("only the following types of index constraints are supported: none, unique")
+	}
+	columns := make([]string, len(indexColumns))
+	for i, indexCol := range indexColumns {
+		columns[i] = indexCol.Name
+	}
+
+	table, err := t.doltTable(ctx)
+	if err != nil {
+		return err
+	}
+
+	unique := constraint == sql.IndexConstraint_Unique
+	ret, err := CreateIndex(ctx, table, indexName, columns, unique, true, comment)
+	if err != nil {
+		return err
+	}
+
+	root, err := t.getRoot(ctx)
+	if err != nil {
+		return err
+	}
+
+	root, err = root.PutTable(ctx, t.tableName, ret.NewTable)
+	if err != nil {
+		return err
+	}
+
+	err = t.setRoot(ctx, root)
+	if err != nil {
+		return err
+	}
+
+	return t.updateFromRoot(ctx, root)
 }
 
 // DropIndex implements sql.IndexAlterableTable
@@ -878,79 +855,82 @@ func (t *AlterableDoltTable) CreateForeignKey(
 	refTblName string,
 	refColumns []string,
 	onUpdate, onDelete sql.ForeignKeyReferenceOption) error {
-	if fkName != "" && !doltdb.IsValidForeignKeyName(fkName) {
-		return fmt.Errorf("invalid foreign key name `%s` as it must match the regular expression %s", fkName, doltdb.ForeignKeyNameRegexStr)
-	}
-	isSelfFk := strings.ToLower(t.tableName) == strings.ToLower(refTblName)
-	if isSelfFk {
-		if len(columns) > 1 {
-			return fmt.Errorf("support for self referential composite foreign keys is not yet implemented")
-		}
-	}
 
-	root, err := t.getRoot(ctx)
-	if err != nil {
-		return err
-	}
-	table, err := t.doltTable(ctx)
-	if err != nil {
-		return err
-	}
+	panic("FKs not supported")
 
-	onUpdateRefOp, err := parseFkReferenceOption(onUpdate)
-	if err != nil {
-		return err
-	}
-	onDeleteRefOp, err := parseFkReferenceOption(onDelete)
-	if err != nil {
-		return err
-	}
-
-	foreignKey := doltdb.ForeignKey{
-		Name:                   fkName,
-		TableName:              t.tableName,
-		TableIndex:             "",
-		TableColumns:           nil,
-		ReferencedTableName:    refTblName,
-		ReferencedTableIndex:   "",
-		ReferencedTableColumns: nil,
-		OnUpdate:               onUpdateRefOp,
-		OnDelete:               onDeleteRefOp,
-		UnresolvedFKDetails: doltdb.UnresolvedFKDetails{
-			TableColumns:           columns,
-			ReferencedTableColumns: refColumns,
-		},
-	}
-
-	fkChecks, err := ctx.GetSessionVariable(ctx, "foreign_key_checks")
-	if err != nil {
-		return err
-	}
-	if fkChecks.(int8) == 1 {
-		root, foreignKey, err = creation.ResolveForeignKey(ctx, root, table, foreignKey)
-		if err != nil {
-			return err
-		}
-	} else {
-		fkc, err := root.GetForeignKeyCollection(ctx)
-		if err != nil {
-			return err
-		}
-		err = fkc.AddKeys(foreignKey)
-		if err != nil {
-			return err
-		}
-		root, err = root.PutForeignKeyCollection(ctx, fkc)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = t.setRoot(ctx, root)
-	if err != nil {
-		return err
-	}
-	return t.updateFromRoot(ctx, root)
+	//if fkName != "" && !doltdb.IsValidForeignKeyName(fkName) {
+	//	return fmt.Errorf("invalid foreign key name `%s` as it must match the regular expression %s", fkName, doltdb.ForeignKeyNameRegexStr)
+	//}
+	//isSelfFk := strings.ToLower(t.tableName) == strings.ToLower(refTblName)
+	//if isSelfFk {
+	//	if len(columns) > 1 {
+	//		return fmt.Errorf("support for self referential composite foreign keys is not yet implemented")
+	//	}
+	//}
+	//
+	//root, err := t.getRoot(ctx)
+	//if err != nil {
+	//	return err
+	//}
+	//table, err := t.doltTable(ctx)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//onUpdateRefOp, err := parseFkReferenceOption(onUpdate)
+	//if err != nil {
+	//	return err
+	//}
+	//onDeleteRefOp, err := parseFkReferenceOption(onDelete)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//foreignKey := doltdb.ForeignKey{
+	//	Name:                   fkName,
+	//	TableName:              t.tableName,
+	//	TableIndex:             "",
+	//	TableColumns:           nil,
+	//	ReferencedTableName:    refTblName,
+	//	ReferencedTableIndex:   "",
+	//	ReferencedTableColumns: nil,
+	//	OnUpdate:               onUpdateRefOp,
+	//	OnDelete:               onDeleteRefOp,
+	//	UnresolvedFKDetails: doltdb.UnresolvedFKDetails{
+	//		TableColumns:           columns,
+	//		ReferencedTableColumns: refColumns,
+	//	},
+	//}
+	//
+	//fkChecks, err := ctx.GetSessionVariable(ctx, "foreign_key_checks")
+	//if err != nil {
+	//	return err
+	//}
+	//if fkChecks.(int8) == 1 {
+	//	root, foreignKey, err = creation.ResolveForeignKey(ctx, root, table, foreignKey)
+	//	if err != nil {
+	//		return err
+	//	}
+	//} else {
+	//	fkc, err := root.GetForeignKeyCollection(ctx)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	err = fkc.AddKeys(foreignKey)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	root, err = root.PutForeignKeyCollection(ctx, fkc)
+	//	if err != nil {
+	//		return err
+	//	}
+	//}
+	//
+	//err = t.setRoot(ctx, root)
+	//if err != nil {
+	//	return err
+	//}
+	//return t.updateFromRoot(ctx, root)
 }
 
 // DropForeignKey implements sql.ForeignKeyAlterableTable

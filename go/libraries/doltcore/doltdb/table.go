@@ -577,7 +577,7 @@ func (t *Table) GetIndexRowData(ctx context.Context, indexName string) (prolly.M
 		return prolly.Map{}, err
 	}
 
-	indexMapRef, ok, err := indexesMap.MaybeGet(ctx, types.String(indexName))
+	mapRef, ok, err := indexesMap.MaybeGet(ctx, types.String(indexName))
 	if err != nil {
 		return prolly.Map{}, err
 	}
@@ -585,7 +585,12 @@ func (t *Table) GetIndexRowData(ctx context.Context, indexName string) (prolly.M
 		return prolly.Map{}, fmt.Errorf("index `%s` is missing its data", indexName)
 	}
 
-	return prolly.MapFromValue(indexMapRef.(types.Ref), sch, t.vrw), nil
+	rows, err := mapRef.(types.Ref).TargetValue(ctx, t.vrw)
+	if err != nil {
+		return prolly.Map{}, err
+	}
+
+	return prolly.MapFromValue(rows, sch, t.vrw), nil
 }
 
 // SetIndexRowData replaces the current row data for the given index and returns an updated Table.

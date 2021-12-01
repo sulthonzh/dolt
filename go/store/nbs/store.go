@@ -1603,3 +1603,33 @@ func (nbs *NomsBlockStore) SetRootChunk(ctx context.Context, root, previous hash
 		// I guess this thing infinitely retries without backoff in the case off errOptimisticLockFailedTables
 	}
 }
+
+func (nbs *NomsBlockStore) GetAll(ctx context.Context, found func(context.Context, *chunks.Chunk)) error {
+	eg, ctx := errgroup.WithContext(ctx)
+
+	ch := make(chan extractRecord, 1024)
+	eg.Go(func() error {
+		defer close(ch)
+		return nbs.tables.extract(ctx, ch)
+	})
+
+	eg.Go(func() error {
+		for {
+			select {
+			case rec, ok := <-ch:
+				if !ok {
+					return nil
+				}
+
+				h := hash.Hash(rec.a)
+				c := chunks.NewChunkWithHash(h, rec.data)
+				found(ctx, &c)
+
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	})
+
+	return eg.Wait()
+}
