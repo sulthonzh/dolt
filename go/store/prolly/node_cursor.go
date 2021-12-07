@@ -156,6 +156,10 @@ func (cur *nodeCursor) valid() bool {
 	return cur.idx >= 0 && cur.idx < cnt
 }
 
+func (cur *nodeCursor) invalidate() {
+	cur.nd = nil
+}
+
 // currentPair returns the item at the currentPair cursor position
 func (cur *nodeCursor) currentPair() nodePair {
 	return cur.nd.getPair(cur.idx)
@@ -293,6 +297,7 @@ func (cur *nodeCursor) advanceInBounds(ctx context.Context) (bool, error) {
 		// of the prolly tree.
 	}
 
+	// failed to advance
 	return false, nil
 }
 
@@ -342,6 +347,7 @@ func (cur *nodeCursor) retreatInBounds(ctx context.Context) (bool, error) {
 		// of the prolly tree.
 	}
 
+	// failed to retreat
 	return false, nil
 }
 

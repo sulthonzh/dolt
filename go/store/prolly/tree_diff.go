@@ -14,36 +14,200 @@
 
 package prolly
 
-import "context"
+import (
+	"bytes"
+	"context"
+
+	"github.com/dolthub/dolt/go/store/val"
+)
 
 type DiffType byte
 
 const (
-	addedDiff    DiffType = 0
-	modifiedDiff DiffType = 1
-	removedDiff  DiffType = 2
+	AddedDiff    DiffType = 0
+	ModifiedDiff DiffType = 1
+	RemovedDiff  DiffType = 2
 )
 
-type nodeDiffIter interface {
-	next(ctx context.Context) (nodeDiff, error)
+type Diff struct {
+	Type     DiffType
+	Key      val.Tuple
+	From, To val.Tuple
 }
 
-type nodeDiff struct {
-	from, to Node
-	typ      DiffType
-}
-
-func diffTrees(ctx context.Context, ns NodeStore, from, to Node, cmp compareFn) nodeDiffIter {
-	return treeDiffer{}
-}
+type DiffFn func(context.Context, Diff) error
 
 type treeDiffer struct {
 	from, to *nodeCursor
 	cmp      compareFn
 }
 
-var _ nodeDiffIter = treeDiffer{}
+func (td treeDiffer) Diff(ctx context.Context, cb DiffFn) (err error) {
+	for td.from.valid() && td.to.valid() {
+		from := td.from.currentPair()
+		to := td.to.currentPair()
 
-func (td treeDiffer) next(ctx context.Context) (d nodeDiff, err error) {
+		cmp := td.cmp(from.key(), to.key())
+		switch {
+		case cmp < 0:
+			err = sendRemoved(ctx, td.from, cb)
+
+		case cmp > 0:
+			err = sendAdded(ctx, td.to, cb)
+
+		case cmp == 0:
+			if !equalValues(from, to) {
+				err = sendModified(ctx, td.from, td.to, cb)
+			} else {
+				err = skipCommon(ctx, td.from, td.to)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	for td.from.valid() {
+		if err = sendRemoved(ctx, td.from, cb); err != nil {
+			return err
+		}
+	}
+
+	for td.to.valid() {
+		if err = sendAdded(ctx, td.to, cb); err != nil {
+			return err
+		}
+	}
+
 	return
+}
+
+func sendRemoved(ctx context.Context, from *nodeCursor, cb DiffFn) (err error) {
+	p := from.currentPair()
+	d := Diff{
+		Type: RemovedDiff,
+		Key:  val.Tuple(p.key()),
+		From: val.Tuple(p.value()),
+	}
+
+	if err = cb(ctx, d); err != nil {
+		return err
+	}
+	if _, err = from.advance(ctx); err != nil {
+		return err
+	}
+	return
+}
+
+func sendAdded(ctx context.Context, to *nodeCursor, cb DiffFn) (err error) {
+	p := to.currentPair()
+	d := Diff{
+		Type: AddedDiff,
+		Key:  val.Tuple(p.key()),
+		To:   val.Tuple(p.value()),
+	}
+
+	if err = cb(ctx, d); err != nil {
+		return err
+	}
+	if _, err = to.advance(ctx); err != nil {
+		return err
+	}
+	return
+}
+
+func sendModified(ctx context.Context, from, to *nodeCursor, cb DiffFn) (err error) {
+	fp := from.currentPair()
+	tp := to.currentPair()
+	d := Diff{
+		Type: ModifiedDiff,
+		Key:  val.Tuple(fp.key()),
+		From: val.Tuple(fp.value()),
+		To:   val.Tuple(tp.value()),
+	}
+
+	if err = cb(ctx, d); err != nil {
+		return err
+	}
+	if _, err = from.advance(ctx); err != nil {
+		return err
+	}
+	if _, err = to.advance(ctx); err != nil {
+		return err
+	}
+	return
+}
+
+func skipCommon(ctx context.Context, from, to *nodeCursor) (err error) {
+	for from.valid() && to.valid() {
+		if !equalItems(from, to) {
+			// found the next difference
+			return nil
+		}
+
+		var equalParents bool
+		if from.parent != nil && to.parent != nil {
+			// todo(andy): we compare here every loop
+			equalParents = equalItems(from.parent, to.parent)
+		}
+		if equalParents {
+			// if our parents are equal, we can search for differences
+			// faster at the next highest tree level.
+			if err = skipCommonParents(ctx, from, to); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// todo(andy): we'd like to not load the next node
+		//  here if we know they're equal (parents are equal),
+		//  however we can only optimize in the case were both
+		//  cursors exhaust their current node at the same time.
+		if _, err = from.advance(ctx); err != nil {
+			return err
+		}
+		if _, err = to.advance(ctx); err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
+func skipCommonParents(ctx context.Context, from, to *nodeCursor) (err error) {
+	err = skipCommon(ctx, from.parent, to.parent)
+	if err != nil {
+		return err
+	}
+
+	if from.parent.valid() {
+		if err = from.fetchNode(ctx); err != nil {
+			return err
+		}
+		from.skipToNodeStart()
+	} else {
+		from.invalidate()
+	}
+
+	if to.parent.valid() {
+		if err = to.fetchNode(ctx); err != nil {
+			return err
+		}
+		to.skipToNodeStart()
+	} else {
+		to.invalidate()
+	}
+
+	return
+}
+
+func equalItems(from, to *nodeCursor) bool {
+	// todo(andy): assumes equal byte representations
+	f, t := from.currentPair(), to.currentPair()
+	return bytes.Equal(f.key(), t.key()) &&
+		bytes.Equal(f.value(), t.value())
+}
+
+func equalValues(from, to nodePair) bool {
+	return bytes.Equal(from.value(), to.value())
 }
