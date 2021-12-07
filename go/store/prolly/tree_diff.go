@@ -17,6 +17,7 @@ package prolly
 import (
 	"bytes"
 	"context"
+	"io"
 
 	"github.com/dolthub/dolt/go/store/val"
 )
@@ -42,98 +43,85 @@ type treeDiffer struct {
 	cmp      compareFn
 }
 
-func (td treeDiffer) Diff(ctx context.Context, cb DiffFn) (err error) {
+func (td treeDiffer) Next(ctx context.Context) (diff Diff, err error) {
 	for td.from.valid() && td.to.valid() {
-		from := td.from.currentPair()
-		to := td.to.currentPair()
 
-		cmp := td.cmp(from.key(), to.key())
+		f := td.from.currentPair()
+		t := td.to.currentPair()
+		cmp := td.cmp(f.key(), t.key())
+		
 		switch {
 		case cmp < 0:
-			err = sendRemoved(ctx, td.from, cb)
+			return sendRemoved(ctx, td.from)
 
 		case cmp > 0:
-			err = sendAdded(ctx, td.to, cb)
+			return sendAdded(ctx, td.to)
 
-		case cmp == 0:
-			if !equalValues(from, to) {
-				err = sendModified(ctx, td.from, td.to, cb)
-			} else {
-				err = skipCommon(ctx, td.from, td.to)
+		case cmp == 0 && !equalValues(f, t):
+			return sendModified(ctx, td.from, td.to)
+
+		case cmp == 0 && equalValues(f, t):
+			// seek ahead to the next diff and loop again
+			if err = skipCommon(ctx, td.from, td.to); err != nil {
+				return Diff{}, err
 			}
 		}
-		if err != nil {
-			return err
-		}
 	}
 
-	for td.from.valid() {
-		if err = sendRemoved(ctx, td.from, cb); err != nil {
-			return err
-		}
+	if td.from.valid() {
+		return sendRemoved(ctx, td.from)
 	}
 
-	for td.to.valid() {
-		if err = sendAdded(ctx, td.to, cb); err != nil {
-			return err
-		}
+	if td.to.valid() {
+		return sendAdded(ctx, td.to)
 	}
 
-	return
+	return Diff{}, io.EOF
 }
 
-func sendRemoved(ctx context.Context, from *nodeCursor, cb DiffFn) (err error) {
-	p := from.currentPair()
-	d := Diff{
+func sendRemoved(ctx context.Context, from *nodeCursor) (diff Diff, err error) {
+	pair := from.currentPair()
+	diff = Diff{
 		Type: RemovedDiff,
-		Key:  val.Tuple(p.key()),
-		From: val.Tuple(p.value()),
+		Key:  val.Tuple(pair.key()),
+		From: val.Tuple(pair.value()),
 	}
 
-	if err = cb(ctx, d); err != nil {
-		return err
-	}
 	if _, err = from.advance(ctx); err != nil {
-		return err
+		return Diff{}, err
 	}
 	return
 }
 
-func sendAdded(ctx context.Context, to *nodeCursor, cb DiffFn) (err error) {
-	p := to.currentPair()
-	d := Diff{
+func sendAdded(ctx context.Context, to *nodeCursor) (diff Diff, err error) {
+	pair := to.currentPair()
+	diff = Diff{
 		Type: AddedDiff,
-		Key:  val.Tuple(p.key()),
-		To:   val.Tuple(p.value()),
+		Key:  val.Tuple(pair.key()),
+		To:   val.Tuple(pair.value()),
 	}
 
-	if err = cb(ctx, d); err != nil {
-		return err
-	}
 	if _, err = to.advance(ctx); err != nil {
-		return err
+		return Diff{}, err
 	}
 	return
 }
 
-func sendModified(ctx context.Context, from, to *nodeCursor, cb DiffFn) (err error) {
-	fp := from.currentPair()
-	tp := to.currentPair()
-	d := Diff{
+func sendModified(ctx context.Context, from, to *nodeCursor) (diff Diff, err error) {
+	fromPair := from.currentPair()
+	toPair := to.currentPair()
+	diff = Diff{
 		Type: ModifiedDiff,
-		Key:  val.Tuple(fp.key()),
-		From: val.Tuple(fp.value()),
-		To:   val.Tuple(tp.value()),
+		Key:  val.Tuple(fromPair.key()),
+		From: val.Tuple(fromPair.value()),
+		To:   val.Tuple(toPair.value()),
 	}
 
-	if err = cb(ctx, d); err != nil {
-		return err
-	}
 	if _, err = from.advance(ctx); err != nil {
-		return err
+		return Diff{}, err
 	}
 	if _, err = to.advance(ctx); err != nil {
-		return err
+		return Diff{}, err
 	}
 	return
 }

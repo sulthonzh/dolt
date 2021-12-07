@@ -52,19 +52,8 @@ func TestMapDiff(t *testing.T) {
 
 func testEmptyMapDiff(t *testing.T, m Map) {
 	ctx := context.Background()
-	from, err := newCursorAtStart(ctx, m.ns, m.root)
-	require.NoError(t, err)
-	to, err := newCursorAtStart(ctx, m.ns, m.root)
-	require.NoError(t, err)
-
-	differ := treeDiffer{
-		from: from,
-		to:   to,
-		cmp:  m.compareItems,
-	}
-
 	var counter int
-	err = differ.Diff(ctx, func(ctx context.Context, diff Diff) error {
+	err := DiffMaps(ctx, m, m, func(ctx context.Context, diff Diff) error {
 		counter++
 		return nil
 	})

@@ -17,6 +17,7 @@ package prolly
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/dolthub/dolt/go/store/val"
 )
@@ -82,7 +83,22 @@ func DiffMaps(ctx context.Context, from, to Map, cb DiffFn) error {
 
 	differ := treeDiffer{from: fc, to: tc, cmp: from.compareItems}
 
-	return differ.Diff(ctx, cb)
+	var diff Diff
+	for {
+		diff, err = differ.Next(ctx)
+		if err != nil {
+			break
+		}
+
+		err = cb(ctx, diff)
+		if err != nil {
+			break
+		}
+	}
+	if err == io.EOF {
+		err = nil
+	}
+	return err
 }
 
 // Mutate makes a MutableMap from a Map.
