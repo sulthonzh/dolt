@@ -26,11 +26,11 @@ import (
 )
 
 func BenchmarkProllyDiff(b *testing.B) {
-	benchmarkProllyMapDiff(b, 100_000, 100)
+	benchmarkProllyMapDiff(b, 100_000, 25)
 }
 
 func BenchmarkTypesDiff(b *testing.B) {
-	benchmarkTypesMapDiff(b, 100_000, 100)
+	benchmarkTypesMapDiff(b, 100_000, 25)
 }
 
 func benchmarkProllyMapDiff(b *testing.B, size, revs uint64) {
@@ -94,7 +94,7 @@ func benchmarkTypesMapDiff(b *testing.B, size, revs uint64) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	b.Run("benchmark prolly map", func(b *testing.B) {
+	b.Run("benchmark types map", func(b *testing.B) {
 		ctx := context.Background()
 		counter := 0
 
