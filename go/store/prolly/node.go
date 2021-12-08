@@ -87,6 +87,7 @@ var emptyNode = Node([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0})
 //   semantics. However, Node could easily be modified to support Set semantics,
 //   or other collections.
 //
+// todo(andy): include hash.Hash?
 type Node []byte
 
 type nodeItem []byte

@@ -109,7 +109,7 @@ type memTupleCursor struct {
 var _ tupleCursor = memTupleCursor{}
 var _ mutationIter = memTupleCursor{}
 
-func (it memTupleCursor) nextMutation() (key, value val.Tuple) {
+func (it memTupleCursor) nextMutation(context.Context) (key, value val.Tuple) {
 	key, value = it.iter.Current()
 	if key == nil {
 		return
@@ -132,10 +132,6 @@ func (it memTupleCursor) retreat(context.Context) (err error) {
 	return
 }
 
-func (it memTupleCursor) count() int {
-	return it.iter.Count()
-}
-
-func (it memTupleCursor) close() error {
-	return nil
+func (it memTupleCursor) empty() bool {
+	return it.iter.Count() == 0
 }
