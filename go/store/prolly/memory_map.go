@@ -135,7 +135,3 @@ func (it memTupleCursor) retreat(context.Context) (err error) {
 func (it memTupleCursor) empty() bool {
 	return it.iter.Count() == 0
 }
-
-func (it memTupleCursor) close() error {
-	return nil
-}

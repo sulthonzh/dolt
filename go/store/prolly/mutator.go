@@ -22,7 +22,6 @@ import (
 
 type mutationIter interface {
 	nextMutation(context.Context) (key, val val.Tuple)
-	close() error
 }
 
 var _ mutationIter = memTupleCursor{}

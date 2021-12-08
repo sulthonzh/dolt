@@ -17,6 +17,7 @@ package prolly
 import (
 	"context"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,7 +43,9 @@ func Test3WayMapMerge(t *testing.T) {
 				testEmptyMapMerge(t, prollyMap.(Map))
 			})
 			t.Run("3way merge inserts", func(t *testing.T) {
-				testMapMergeInserts(t, prollyMap.(Map), tuples)
+				for k := 0; k < 10; k++ {
+					testMapMergeInserts(t, prollyMap.(Map), tuples)
+				}
 			})
 		})
 	}
@@ -79,8 +82,39 @@ func testMapMergeInserts(t *testing.T, final Map, tups [][2]val.Tuple) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 0, cnt)
+
+	compareMaps(t, final, final2)
 }
 
 func panicOnConflict(left, right Diff) (Diff, bool) {
 	panic("cannot merge cells")
+}
+
+func compareMaps(t *testing.T, left, right Map) {
+	ctx := context.Background()
+	l, err := left.IterAll(ctx)
+	require.NoError(t, err)
+	r, err := right.IterAll(ctx)
+	require.NoError(t, err)
+
+	cnt := uint64(0)
+	for {
+		lk, lv, err := l.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+
+		rk, rv, err := r.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+
+		assert.Equal(t, lk, rk)
+		assert.Equal(t, lv, rv)
+		cnt++
+	}
+	assert.Equal(t, left.Count(), cnt)
+	assert.Equal(t, right.Count(), cnt)
 }

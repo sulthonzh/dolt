@@ -26,11 +26,15 @@ import (
 
 const patchBufferSize = 1024
 
-type ConflictFn func(left, right Diff) (Diff, bool)
+type TupleMergeFn func(left, right Diff) (Diff, bool)
 
-type patch [2]val.Tuple
-
-func ThreeWayMerge(ctx context.Context, base, left, right Map, cb ConflictFn) (Map, error) {
+// ThreeWayMerge implements a three-way merge algorithm using |base| as the common ancestor, |right| as
+// the source branch, and |left| as the destination branch. Both |left| and |right| are diff'd against
+// |base| to compute merge patches, but rather than applying both sets of patches to |base|, patches from
+// |right| are applied directly to |left|. This reduces the amount of write work and improves performance.
+// In the case that a key-value pair was modified on both |left| and |right| with different resulting
+// values, the TupleMergeFn is called to perform a cell-wise merge, or to throw a conflict.
+func ThreeWayMerge(ctx context.Context, base, left, right Map, cb TupleMergeFn) (final Map, err error) {
 	ld, err := treeDifferFromMaps(ctx, base, left)
 	if err != nil {
 		return Map{}, err
@@ -41,17 +45,16 @@ func ThreeWayMerge(ctx context.Context, base, left, right Map, cb ConflictFn) (M
 		return Map{}, err
 	}
 
-	var finished Map
-	buf := make(chan patch, patchBufferSize)
-	src := patchSource{src: buf}
-
 	eg, ctx := errgroup.WithContext(ctx)
+	buf := newPatchBuffer(patchBufferSize)
+
 	eg.Go(func() error {
-		defer close(buf)
+		defer buf.close()
 		return sendPatches(ctx, ld, rd, buf, cb)
 	})
-	eg.Go(func() (err error) {
-		finished, err = materializeMutations(ctx, left, src)
+
+	eg.Go(func() error {
+		final, err = materializeMutations(ctx, left, buf)
 		return err
 	})
 
@@ -59,10 +62,50 @@ func ThreeWayMerge(ctx context.Context, base, left, right Map, cb ConflictFn) (M
 		return Map{}, err
 	}
 
-	return finished, nil
+	return final, nil
 }
 
-func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, conflict ConflictFn) (err error) {
+// patchBuffer implements mutationIter. It consumes Diffs
+// from the parallel treeDiffers and transforms them into
+// patches for the treeChunker to apply.
+type patchBuffer struct {
+	buf chan patch
+}
+
+var _ mutationIter = patchBuffer{}
+
+type patch [2]val.Tuple
+
+func newPatchBuffer(sz int) patchBuffer {
+	return patchBuffer{buf: make(chan patch, sz)}
+}
+
+func (ps patchBuffer) sendPatch(ctx context.Context, diff Diff) error {
+	p := patch{diff.Key, diff.To}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ps.buf <- p:
+		return nil
+	}
+}
+
+// nextMutation implements mutationIter.
+func (ps patchBuffer) nextMutation(ctx context.Context) (val.Tuple, val.Tuple) {
+	var p patch
+	select {
+	case p = <-ps.buf:
+		return p[0], p[1]
+	case <-ctx.Done():
+		return nil, nil
+	}
+}
+
+func (ps patchBuffer) close() {
+	close(ps.buf)
+}
+
+func sendPatches(ctx context.Context, l, r treeDiffer, buf patchBuffer, cb TupleMergeFn) (err error) {
 	var (
 		left, right Diff
 		lok, rok    = true, true
@@ -70,8 +113,7 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 
 	left, err = l.Next(ctx)
 	if err == io.EOF {
-		err = nil
-		lok = false
+		err, lok = nil, false
 	}
 	if err != nil {
 		return err
@@ -79,8 +121,7 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 
 	right, err = r.Next(ctx)
 	if err == io.EOF {
-		err = nil
-		rok = false
+		err, rok = nil, false
 	}
 	if err != nil {
 		return err
@@ -101,7 +142,7 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 			}
 
 		case cmp > 0:
-			err = sendPatch(ctx, right, sink)
+			err = buf.sendPatch(ctx, right)
 			if err != nil {
 				return err
 			}
@@ -120,9 +161,9 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 				continue
 			}
 
-			resolved, ok := conflict(left, right)
+			resolved, ok := cb(left, right)
 			if ok {
-				err = sendPatch(ctx, resolved, sink)
+				err = buf.sendPatch(ctx, resolved)
 			}
 			if err != nil {
 				return err
@@ -136,7 +177,7 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 	}
 
 	for rok {
-		err = sendPatch(ctx, right, sink)
+		err = buf.sendPatch(ctx, right)
 		if err != nil {
 			return err
 		}
@@ -153,26 +194,6 @@ func sendPatches(ctx context.Context, l, r treeDiffer, sink chan<- patch, confli
 	return nil
 }
 
-func sendPatch(ctx context.Context, diff Diff, sink chan<- patch) error {
-	var p patch
-	switch diff.Type {
-	case AddedDiff:
-		p[0], p[1] = diff.Key, diff.To
-	case ModifiedDiff:
-		p[0], p[1] = diff.Key, diff.To
-	case RemovedDiff:
-		p[0], p[1] = diff.Key, nil
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case sink <- p:
-	}
-
-	return nil
-}
-
 func compareDiffKeys(left, right Diff, cmp compareFn) int {
 	return cmp(nodeItem(left.Key), nodeItem(right.Key))
 }
@@ -181,24 +202,4 @@ func equalDiffVals(left, right Diff) bool {
 	// todo(andy): bytes must be comparable
 	ok := left.Type == right.Type
 	return ok && bytes.Equal(left.To, right.To)
-}
-
-type patchSource struct {
-	src <-chan patch
-}
-
-var _ mutationIter = patchSource{}
-
-func (ps patchSource) nextMutation(ctx context.Context) (val.Tuple, val.Tuple) {
-	var p patch
-	select {
-	case p = <-ps.src:
-		return p[0], p[1]
-	case <-ctx.Done():
-		return nil, nil
-	}
-}
-
-func (ps patchSource) close() error {
-	return nil
 }
