@@ -16,13 +16,15 @@ package benchmark
 
 import (
 	"context"
+	"math/rand"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/dolthub/dolt/go/store/prolly"
 	"github.com/dolthub/dolt/go/store/types"
 	"github.com/dolthub/dolt/go/store/val"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"math/rand"
-	"testing"
 )
 
 func BenchmarkProllyDiff(b *testing.B) {
@@ -88,7 +90,6 @@ func generateProllyDiffBench(t *testing.B, size, revisions uint64) (d prollyDiff
 	return d
 }
 
-
 func benchmarkTypesMapDiff(b *testing.B, size, revs uint64) {
 	bench := generateTypesDiffBench(b, size, revs)
 	b.ReportAllocs()
@@ -115,7 +116,7 @@ func benchmarkTypesMapDiff(b *testing.B, size, revs uint64) {
 				ok := true
 				for ok {
 					select {
-					case d, ok = <- diffs:
+					case d, ok = <-diffs:
 						if ok {
 							counter++
 						}
@@ -154,4 +155,3 @@ func generateTypesDiffBench(t *testing.B, size, revisions uint64) (d typesDiffBe
 
 	return d
 }
-

@@ -43,13 +43,27 @@ type treeDiffer struct {
 	cmp      compareFn
 }
 
+func treeDifferFromMaps(ctx context.Context, from, to Map) (treeDiffer, error) {
+	fc, err := newCursorAtStart(ctx, from.ns, from.root)
+	if err != nil {
+		return treeDiffer{}, err
+	}
+
+	tc, err := newCursorAtStart(ctx, to.ns, to.root)
+	if err != nil {
+		return treeDiffer{}, err
+	}
+
+	return treeDiffer{from: fc, to: tc, cmp: from.compareItems}, nil
+}
+
 func (td treeDiffer) Next(ctx context.Context) (diff Diff, err error) {
 	for td.from.valid() && td.to.valid() {
 
 		f := td.from.currentPair()
 		t := td.to.currentPair()
 		cmp := td.cmp(f.key(), t.key())
-		
+
 		switch {
 		case cmp < 0:
 			return sendRemoved(ctx, td.from)

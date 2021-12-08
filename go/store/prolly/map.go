@@ -71,17 +71,10 @@ func NewMapFromTuples(ctx context.Context, ns NodeStore, keyDesc, valDesc val.Tu
 }
 
 func DiffMaps(ctx context.Context, from, to Map, cb DiffFn) error {
-	fc, err := newCursorAtStart(ctx, from.ns, from.root)
+	differ, err := treeDifferFromMaps(ctx, from, to)
 	if err != nil {
 		return err
 	}
-
-	tc, err := newCursorAtStart(ctx, to.ns, to.root)
-	if err != nil {
-		return err
-	}
-
-	differ := treeDiffer{from: fc, to: tc, cmp: from.compareItems}
 
 	var diff Diff
 	for {

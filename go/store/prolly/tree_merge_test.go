@@ -25,7 +25,7 @@ import (
 	"github.com/dolthub/dolt/go/store/val"
 )
 
-func TestMapDiff(t *testing.T) {
+func Test3WayMapMerge(t *testing.T) {
 	scales := []int{
 		10,
 		100,
@@ -38,53 +38,49 @@ func TestMapDiff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			prollyMap, tuples := makeProllyMap(t, s)
 
-			t.Run("empty map diff", func(t *testing.T) {
-				testEmptyMapDiff(t, prollyMap.(Map))
+			t.Run("merge identical maps", func(t *testing.T) {
+				testEmptyMapMerge(t, prollyMap.(Map))
 			})
-			t.Run("single map diff", func(t *testing.T) {
-				for k := 0; k < 100; k++ {
-					testSingleMapDiff(t, prollyMap.(Map), tuples)
-				}
+			t.Run("3way merge inserts", func(t *testing.T) {
+				testMapMergeInserts(t, prollyMap.(Map), tuples)
 			})
 		})
 	}
 }
 
-func testEmptyMapDiff(t *testing.T, m Map) {
+func testEmptyMapMerge(t *testing.T, m Map) {
 	ctx := context.Background()
-	var counter int
-	err := DiffMaps(ctx, m, m, func(ctx context.Context, diff Diff) error {
-		counter++
+	mm, err := ThreeWayMerge(ctx, m, m, m, panicOnConflict)
+	require.NoError(t, err)
+	assert.NotNil(t, mm)
+	assert.Equal(t, m.Count(), mm.Count())
+}
+
+func testMapMergeInserts(t *testing.T, final Map, tups [][2]val.Tuple) {
+	testRand.Shuffle(len(tups), func(i, j int) {
+		tups[i], tups[j] = tups[j], tups[i]
+	})
+
+	// edit 10%
+	sz := final.Count() / 10
+
+	left := deleteKeys(t, final, tups[:sz]...)
+	right := deleteKeys(t, final, tups[sz:sz*2]...)
+	base := deleteKeys(t, final, tups[:sz*2]...)
+
+	ctx := context.Background()
+	final2, err := ThreeWayMerge(ctx, base, left, right, panicOnConflict)
+	require.NoError(t, err)
+
+	cnt := 0
+	err = DiffMaps(ctx, final, final2, func(ctx context.Context, diff Diff) error {
+		cnt++
 		return nil
 	})
 	require.NoError(t, err)
-	assert.Equal(t, 0, counter)
+	assert.Equal(t, 0, cnt)
 }
 
-func testSingleMapDiff(t *testing.T, from Map, tuples [][2]val.Tuple) {
-	ctx := context.Background()
-
-	idx := testRand.Int() % len(tuples)
-	to := deleteKeys(t, from, tuples[idx])
-
-	var counter int
-	err := DiffMaps(ctx, from, to, func(ctx context.Context, diff Diff) error {
-		assert.Equal(t, RemovedDiff, diff.Type)
-		counter++
-		return nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 1, counter)
-}
-
-func deleteKeys(t *testing.T, m Map, deletes ...[2]val.Tuple) Map {
-	ctx := context.Background()
-	mut := m.Mutate()
-	for _, pair := range deletes {
-		err := mut.Put(ctx, pair[0], nil)
-		require.NoError(t, err)
-	}
-	mm, err := mut.Map(ctx)
-	require.NoError(t, err)
-	return mm
+func panicOnConflict(left, right Diff) (Diff, bool) {
+	panic("cannot merge cells")
 }
