@@ -10,14 +10,14 @@ git](https://en.wikipedia.org/wiki/Git#Naming):
 > bastard, and I name all my projects after myself. First 'Linux',
 > now 'git'."
 
-We wanted a word meaning "idiot", starting with D for Data, 
+We wanted a word meaning "idiot", starting with D for Data,
 short enough to type on the command line, and
 not taken in the standard command line lexicon. So,
 `dolt`.
 
 ## The MySQL shell gives me an error: `Can't connect to local MySQL server through socket '/tmp/mysql.sock'`
 
-The MySQL shell will try to connect through a socket file on many OSes. 
+The MySQL shell will try to connect through a socket file on many OSes.
 To force it to use TCP instead, give it the loopback address like this:
 
 ```bash
@@ -71,13 +71,13 @@ SQL](https://www.dolthub.com/blog/2021-03-15-programmatic-merge-and-resolve/)
 Yes, it should exactly work the same as MySQL, but with fewer locks for competing writes.
 
 It's also possible for different sessions to connect to different HEADs (branches) on
-the same server. See [working with multiple heads](https://docs.dolthub.com/interfaces/sql/heads) 
+the same server. See [working with multiple heads](https://docs.dolthub.com/reference/sql/branches#detatched-head-mode)
 for details.
 
 ## What SQL features / syntax are supported?
 
 Most of them! Check out [the docs for the full list of supported
-features](https://docs.dolthub.com/interfaces/sql/sql-support).
+features](https://docs.dolthub.com/reference/sql/support).
 
 You can check out what we're working on next on our
 [roadmap](roadmap.md). Paying customers get their feature requests
