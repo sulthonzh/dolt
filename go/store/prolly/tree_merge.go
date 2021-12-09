@@ -34,7 +34,7 @@ type TupleMergeFn func(left, right Diff) (Diff, bool)
 // |right| are applied directly to |left|. This reduces the amount of write work and improves performance.
 // In the case that a key-value pair was modified on both |left| and |right| with different resulting
 // values, the TupleMergeFn is called to perform a cell-wise merge, or to throw a conflict.
-func ThreeWayMerge(ctx context.Context, base, left, right Map, cb TupleMergeFn) (final Map, err error) {
+func ThreeWayMerge(ctx context.Context, left, right, base Map, cb TupleMergeFn) (final Map, err error) {
 	ld, err := treeDifferFromMaps(ctx, base, left)
 	if err != nil {
 		return Map{}, err

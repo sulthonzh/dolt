@@ -1268,9 +1268,9 @@ func GetGCKeepers(ctx context.Context, env *DoltEnv) ([]hash.Hash, error) {
 }
 
 func (dEnv *DoltEnv) DbEaFactory() editor.DbEaFactory {
-	panic("unimplemented")
+	return nil
 }
 
 func (dEnv *DoltEnv) BulkDbEaFactory() editor.DbEaFactory {
-	panic("unimplemented")
+	return nil
 }
