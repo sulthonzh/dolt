@@ -11,3 +11,13 @@ benchmark/perf_tools/dolt-builds/working
 benchmark/perf_tools/output
 
 test.sh
+# Standard patterns (code-quality-supervisor)
+dist/
+build/
+node_modules/
+*.log
+coverage/
+__pycache__/
+.venv/
+*.egg-info/
+.mypy_cache/
